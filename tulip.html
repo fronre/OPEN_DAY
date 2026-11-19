@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tulip Bouquet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#05040b; --pink:#ffb3cf; --text:#fff; --muted:#8f8aa8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overflow:hidden;
+    font-family:"Outfit",system-ui,sans-serif}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block;cursor:pointer}
+  header{position:fixed;top:clamp(14px,4vh,40px);left:0;right:0;text-align:center;pointer-events:none;padding:0 16px}
+  h1{margin:0;font-weight:500;font-size:clamp(24px,4.4vw,42px);letter-spacing:.5px}
+  h1 span{color:var(--pink)}
+  .hint{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:var(--muted);
+    font-size:13px;pointer-events:none;opacity:.7}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<header><h1><span>Tulip</span> Flower Animation</h1></header>
+<div class="hint">Click to replay</div>
+
+<script>
+(() => {
+  const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+  // ?t=8 في الرابط يبدأ من الثانية 8 مباشرة (مفيد للعرض أو لأخذ صورة)
+  const START = +(new URLSearchParams(location.search).get("t") || 0);
+  let W, H, DPR, U, BX, BY, stars = [], pollen = [], t0 = performance.now() - START * 1000;
+
+  // ألوان كل زهرة: [غامق, متوسط, فاتح, توهج]
+  const PALETTES = [
+    ["#8e0f2e", "#ff3d6e", "#ffc2d2", "#ff4f7d"],   // أحمر
+    ["#a3175a", "#ff72a8", "#ffe0ec", "#ff8ab8"],   // وردي
+    ["#4b2390", "#9d63f2", "#eadbff", "#a774ff"],   // بنفسجي
+    ["#b86e00", "#ffc23a", "#fff3c4", "#ffcf5a"],   // أصفر
+    ["#b83a10", "#ff8a5b", "#ffdccd", "#ff9a6e"],   // مرجاني
+    ["#8e0f2e", "#ff4f8a", "#ffd0de", "#ff5f93"],
+    ["#5a2a9e", "#c37bff", "#f1e3ff", "#c58aff"],
+  ];
+  // الباقة: زاوية الساق، طولها، تأخير النمو، اللون
+  const TULIPS = [
+    { a: -0.50, len: 0.50, d: 0.9, p: 3 },
+    { a:  0.52, len: 0.49, d: 1.1, p: 4 },
+    { a: -0.30, len: 0.60, d: 0.5, p: 1 },
+    { a:  0.30, len: 0.61, d: 0.6, p: 2 },
+    { a: -0.10, len: 0.70, d: 0.2, p: 0 },
+    { a:  0.12, len: 0.66, d: 0.35, p: 6 },
+    { a:  0.00, len: 0.55, d: 1.3, p: 5 },
+  ];
+  TULIPS.forEach((t, i) => t.ph = i * 1.7);
+
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  const ease = x => 1 - Math.pow(1 - clamp(x), 3);
+  const easeIO = x => { x = clamp(x); return x < .5 ? 4*x*x*x : 1 - Math.pow(-2*x + 2, 3) / 2; };
+  const rnd = (a, b) => a + Math.random() * (b - a);
+
+  function resize(){
+    DPR = Math.min(devicePixelRatio || 1, 2);
+    W = innerWidth; H = innerHeight;
+    cv.width = W * DPR; cv.height = H * DPR;
+    U = Math.min(W * 1.15, H * 0.92);            // وحدة القياس
+    BX = W / 2; BY = H * 0.97;
+    stars = Array.from({ length: Math.round(W * H / 5000) }, () => ({
+      x: Math.random() * W, y: Math.random() * H * 0.9, r: rnd(.3, 1.3), ph: rnd(0, 6.3), s: rnd(.5, 2)
+    }));
+  }
+
+  // نقطة على الساق (منحنى بيزييه تربيعي) عند s ∈ [0,1]
+  function stemGeo(t, time){
+    const sway = Math.sin(time * 0.9 + t.ph) * 0.035 + Math.sin(time * 0.37 + t.ph) * 0.02;
+    const a = t.a + sway, L = t.len * U;
+    const tip = [BX + Math.sin(a) * L, BY - Math.cos(a) * L];
+    const ctrl = [BX + Math.sin(a * 0.35) * L * 0.55, BY - L * 0.55];
+    const at = s => {
+      const m = 1 - s;
+      return [m*m*BX + 2*m*s*ctrl[0] + s*s*tip[0], m*m*BY + 2*m*s*ctrl[1] + s*s*tip[1]];
+    };
+    const dir = s => {
+      const dx = 2*(1-s)*(ctrl[0]-BX) + 2*s*(tip[0]-ctrl[0]);
+      const dy = 2*(1-s)*(ctrl[1]-BY) + 2*s*(tip[1]-ctrl[1]);
+      return Math.atan2(dx, -dy);                 // 0 = للأعلى
+    };
+    return { at, dir };
+  }
+
+  function drawStem(g, grow){
+    const n = 40, k = Math.max(1, Math.round(n * grow));
+    ctx.beginPath();
+    for (let i = 0; i <= k; i++){
+      const [x, y] = g.at(i / n * Math.min(1, grow * n / k));
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    const grad = ctx.createLinearGradient(BX, BY, BX, BY - U * 0.7);
+    grad.addColorStop(0, "#1f5e2c"); grad.addColorStop(1, "#5fcf6a");
+    ctx.strokeStyle = grad; ctx.lineWidth = U * 0.0085; ctx.lineCap = "round";
+    ctx.shadowColor = "rgba(90,220,110,.45)"; ctx.shadowBlur = U * 0.012;
+    ctx.stroke(); ctx.shadowBlur = 0;
+  }
+
+  // ورقة طويلة تنفتح من الساق
+  function drawLeaf(g, s0, side, open, size){
+    if (open <= 0) return;
+    const [x, y] = g.at(s0), base = g.dir(s0);
+    const ang = base + side * (0.15 + 0.55 * open);
+    const L = size * U * (0.35 + 0.65 * open), w = L * 0.17;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(side * w * 1.4, -L * 0.3, side * w * 1.1, -L * 0.75, side * w * 0.4, -L);
+    ctx.bezierCurveTo(side * -w * 0.1, -L * 0.7, side * -w * 0.3, -L * 0.3, 0, 0);
+    const gr = ctx.createLinearGradient(0, 0, 0, -L);
+    gr.addColorStop(0, "#1c5428"); gr.addColorStop(.6, "#3ea04d"); gr.addColorStop(1, "#86e08a");
+    ctx.fillStyle = gr;
+    ctx.shadowColor = "rgba(80,200,100,.35)"; ctx.shadowBlur = U * 0.015;
+    ctx.fill(); ctx.shadowBlur = 0;
+    ctx.beginPath(); ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(side * w * 0.55, -L * 0.5, side * w * 0.4, -L * 0.97);
+    ctx.strokeStyle = "rgba(200,255,200,.25)"; ctx.lineWidth = U * 0.0018; ctx.stroke();
+    ctx.restore();
+  }
+
+  // بتلة: قاعدتها عند (0,0) وتتجه للأعلى
+  function petal(len, wid, rot, colors, alpha, shade){
+    ctx.save(); ctx.rotate(rot);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(wid * 1.15, -len * 0.12, wid * 1.05, -len * 0.78, wid * 0.18, -len);
+    ctx.quadraticCurveTo(0, -len * 1.06, -wid * 0.18, -len);
+    ctx.bezierCurveTo(-wid * 1.05, -len * 0.78, -wid * 1.15, -len * 0.12, 0, 0);
+    const gr = ctx.createLinearGradient(0, 0, 0, -len);
+    gr.addColorStop(0, colors[0]); gr.addColorStop(.45, colors[1]); gr.addColorStop(1, colors[2]);
+    ctx.globalAlpha = alpha; ctx.fillStyle = gr; ctx.fill();
+    if (shade){                                    // تظليل للبتلات الخلفية
+      ctx.fillStyle = `rgba(10,0,20,${shade})`; ctx.fill();
+    }
+    // عرق البتلة اللامع
+    ctx.beginPath(); ctx.moveTo(0, -len * 0.08); ctx.quadraticCurveTo(wid * 0.12, -len * 0.55, 0, -len * 0.92);
+    ctx.strokeStyle = "rgba(255,255,255,.28)"; ctx.lineWidth = Math.max(1, len * 0.02); ctx.stroke();
+    ctx.restore(); ctx.globalAlpha = 1;
+  }
+
+  function drawHead(g, t, bloom, time){
+    const [x, y] = g.at(1), ang = g.dir(1);
+    const c = PALETTES[t.p];
+    const sz = U * 0.085 * (0.25 + 0.75 * ease(bloom * 1.6));
+    const open = easeIO((bloom - 0.25) / 0.75);   // البرعم يكبر ثم ينفتح
+    const breathe = 1 + 0.03 * Math.sin(time * 1.6 + t.ph);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(breathe, breathe);
+
+    // توهج خلف الزهرة
+    const halo = ctx.createRadialGradient(0, -sz * 0.6, 0, 0, -sz * 0.6, sz * 2.2);
+    halo.addColorStop(0, c[3] + "55"); halo.addColorStop(1, c[3] + "00");
+    ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(0, -sz * 0.6, sz * 2.2, 0, 7); ctx.fill();
+
+    ctx.shadowColor = c[3]; ctx.shadowBlur = sz * 0.5;
+    const len = sz * 1.25, wid = sz * (0.32 + 0.12 * open);
+    // بتلات خلفية
+    petal(len * 0.98, wid, -0.18 - 0.42 * open, c, 1, 0.38);
+    petal(len * 0.98, wid,  0.18 + 0.42 * open, c, 1, 0.38);
+    petal(len * 1.02, wid * 0.95, 0, c, 1, 0.22);
+    ctx.shadowBlur = sz * 0.25;
+    // بتلات أمامية
+    petal(len, wid * 1.05, -0.08 - 0.30 * open, c, 1, 0);
+    petal(len, wid * 1.05,  0.08 + 0.30 * open, c, 1, 0);
+    petal(len * 0.96, wid * 0.9, 0, c, 0.92, 0);
+    ctx.shadowBlur = 0;
+
+    // كأس أخضر صغير عند القاعدة
+    ctx.beginPath(); ctx.ellipse(0, -sz * 0.04, sz * 0.13, sz * 0.09, 0, 0, 7);
+    ctx.fillStyle = "#3c9a4a"; ctx.fill();
+    ctx.restore();
+
+    // حبوب لقاح مضيئة تطير من الزهور المفتوحة
+    if (open > 0.6 && Math.random() < 0.06){
+      pollen.push({ x: x + rnd(-sz, sz) * 0.5, y: y - sz, vx: rnd(-8, 8), vy: rnd(-22, -10),
+                    life: 0, max: rnd(2.5, 4.5), r: rnd(.8, 2.2), c: c[2] });
+    }
+  }
+
+  function drawRibbon(time, show){
+    if (show <= 0) return;
+    const y = BY - U * 0.16, w = U * 0.05;
+    ctx.save(); ctx.globalAlpha = show;
+    ctx.shadowColor = "#ff8ab8"; ctx.shadowBlur = U * 0.02;
+    const gr = ctx.createLinearGradient(BX - w, 0, BX + w, 0);
+    gr.addColorStop(0, "#c2185b"); gr.addColorStop(.5, "#ff9ec4"); gr.addColorStop(1, "#c2185b");
+    ctx.fillStyle = gr;
+    ctx.beginPath(); ctx.roundRect(BX - w, y - U * 0.012, w * 2, U * 0.03, U * 0.008); ctx.fill();
+    // فيونكة
+    const s = U * 0.045, wob = Math.sin(time * 1.3) * 0.06;
+    for (const side of [-1, 1]){
+      ctx.save(); ctx.translate(BX, y); ctx.rotate(side * (0.35 + wob));
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(side * s * 1.2, -s * 0.9, side * s * 1.6, s * 0.4, 0, 0);
+      ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(BX, y + U * 0.006); ctx.rotate(side * (0.25 - wob));
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(side * s * 0.25, s * 1.5); ctx.lineTo(side * s * 0.55, s * 1.35); ctx.closePath();
+      ctx.fill(); ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(BX, y, U * 0.011, 0, 7); ctx.fillStyle = "#ffd1e3"; ctx.fill();
+    ctx.restore();
+  }
+
+  let last = performance.now();
+  function frame(now){
+    const time = (now - t0) / 1000, dt = Math.min(0.05, (now - last) / 1000); last = now;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+    // الخلفية
+    const bg = ctx.createRadialGradient(W/2, H*0.55, 0, W/2, H*0.55, Math.max(W, H) * 0.8);
+    bg.addColorStop(0, "#1a0f2e"); bg.addColorStop(.55, "#0b0718"); bg.addColorStop(1, "#040309");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    for (const s of stars){
+      ctx.globalAlpha = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(time * s.s + s.ph));
+      ctx.fillStyle = "#dcd6ff"; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // الأبعد أولاً: الأطول في الخلف
+    const order = [...TULIPS].sort((a, b) => b.len - a.len);
+    for (const t of order){
+      const local = time - t.d;
+      const grow = ease(local / 2.6);
+      if (grow <= 0) continue;
+      const g = stemGeo(t, time);
+      drawLeaf(g, 0.18, t.a < 0 ? -1 : 1, ease((local - 1.2) / 1.8), 0.20 + t.len * 0.12);
+      drawStem(g, grow);
+    }
+    for (const t of order){
+      const local = time - t.d;
+      if (local < 2.2) continue;
+      const g = stemGeo(t, time);
+      drawHead(g, t, clamp((local - 2.2) / 2.8), time);
+    }
+    drawRibbon(time, ease((time - 3.6) / 1.2));
+
+    // حبوب اللقاح
+    ctx.globalCompositeOperation = "lighter";
+    pollen = pollen.filter(p => (p.life += dt) < p.max);
+    for (const p of pollen){
+      p.x += (p.vx + Math.sin(p.life * 2 + p.y * 0.01) * 10) * dt; p.y += p.vy * dt;
+      const a = Math.sin(Math.PI * p.life / p.max);
+      ctx.globalAlpha = a; ctx.fillStyle = p.c;
+      ctx.shadowColor = p.c; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
+    }
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+
+    requestAnimationFrame(frame);
+  }
+
+  cv.addEventListener("click", () => { t0 = performance.now(); pollen = []; });
+  addEventListener("resize", resize);
+  resize(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
