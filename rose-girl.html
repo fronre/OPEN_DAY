@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Know It's You</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#08050f; --muted:#6d6380; --pink:#f6c9d8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:var(--bg);color:#fff;font-family:Outfit,system-ui,sans-serif}
+  body{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px}
+  canvas{display:block;height:min(86vh,calc((100vw - 32px) * 7 / 8));aspect-ratio:8/7;
+    border-radius:6px;box-shadow:0 0 60px rgba(200,150,230,.10);cursor:pointer;background:var(--bg)}
+  .bar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;justify-content:center;font-size:13px;color:var(--muted)}
+  button{font:inherit;color:var(--pink);background:transparent;border:1px solid #3a2f4a;border-radius:999px;
+    padding:6px 14px;cursor:pointer}
+  button:hover{border-color:var(--pink)}
+  body.drag canvas{outline:2px dashed var(--pink);outline-offset:6px}
+</style>
+</head>
+<body>
+  <canvas id="c" width="800" height="700"></canvas>
+  <div class="bar">
+    <span>Click to replay</span>
+    <button id="pick">Use your own image</button>
+    <input id="file" type="file" accept="image/*" hidden>
+  </div>
+
+<script>
+(() => {
+// ======================= settings (مثل الكود الأصلي) =======================
+const W = 800, H = 700;
+const BG = [8, 5, 15];
+const QUOTE = "I Don't Need to See You to Know It's You.";
+const COLORS = [[255,182,205],[255,205,225],[215,175,245],[255,222,195],[190,205,255],[245,240,255]];
+const MAX_PARTICLES = 11000;
+const EDGE_THRESH = 70;        // حساسية الحواف للصورة الخاصة (مثل Canny)
+const ORDER_JITTER = 0.35;
+const TWINKLES_PER_FRAME = 14;
+const TWINKLE_LIFE = [20, 45];
+const STARS = 160;
+// ضجيج -> تكوُّن الخطوط -> ثبات + النص -> تبعثر
+const T = { noise: 1.4, form: 5.0, hold: 7.5, melt: 3.0 };
+const FORM_SPREAD = 3.0, FLY = 1.5;
+
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+const buf = document.createElement("canvas"); buf.width = W; buf.height = H;
+const bctx = buf.getContext("2d");
+const img = bctx.createImageData(W, H);
+const px32 = new Uint32Array(img.data.buffer);
+const BG32 = (255 << 24) | (BG[2] << 16) | (BG[1] << 8) | BG[0];
+const rand = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+
+// ======================= الرسم الخطّي: فتاة معصوبة العينين + يد تقدّم وردة =======================
+const ART = [
+  // وجه الفتاة (جانبي)
+  "M300 140 C312 165 318 190 318 208 C320 222 326 236 338 254 C342 260 336 266 326 266 C328 272 330 276 326 280 L320 284 C326 288 328 294 322 298 C320 308 318 316 310 322 C300 328 292 330 288 334",
+  "M290 334 C288 360 290 400 296 440",                       // الرقبة
+  "M296 440 C312 470 330 492 344 525 C352 545 352 580 346 640", // الصدر
+  // الرأس من الأعلى والخلف
+  "M300 140 C295 105 260 84 225 90 C185 96 158 126 154 166 C150 204 146 240 132 282",
+  // عصابة العينين
+  "M318 206 C280 198 230 193 178 199",
+  "M325 237 C285 232 235 229 182 236",
+  "M318 206 C321 218 323 228 325 237",
+  "M178 199 C164 206 162 228 182 236",
+  "M172 210 C150 194 134 214 158 226 C164 228 170 222 172 216",
+  "M171 230 C156 270 150 322 162 384",                       // طرفا العقدة
+  "M179 235 C182 282 194 322 186 364",
+  // يد الفتاة عند الصدر
+  "M286 606 C290 576 300 552 316 534 C324 526 333 528 330 537 C325 548 318 558 316 568",
+  "M316 534 C326 514 337 508 341 516 C342 526 333 540 324 550",
+  "M326 520 C334 498 346 494 349 503 C350 512 342 524 336 532",
+  "M286 606 C300 612 318 606 330 590",
+  // الوردة
+  "M520 205 C518 240 540 262 562 262 C588 262 606 240 602 205",
+  "M535 200 C535 175 560 165 578 178 C592 190 585 212 565 214 C548 216 542 200 552 192 C560 186 572 192 568 202",
+  "M520 205 C505 190 512 168 535 168",
+  "M602 205 C618 188 610 165 585 165",
+  "M535 168 C548 155 570 152 585 165",
+  "M528 222 C545 236 580 238 596 222",
+  "M548 262 C540 272 530 277 518 274",
+  "M576 262 C584 272 596 277 608 272",
+  "M562 262 C560 320 566 380 562 470",                       // الساق
+  "M562 330 C585 312 612 314 630 330 C607 346 582 346 562 330 Z",
+  "M566 330 L622 330",
+  "M561 392 C540 376 515 379 499 393 C520 407 543 406 561 392 Z",
+  "M563 300 L573 293", "M561 425 L551 418",
+  "M563 555 L567 625",
+  // اليد التي تمسك الوردة
+  "M800 470 C745 466 700 470 662 478",
+  "M662 478 C640 469 610 461 586 465 C572 468 572 477 586 479 L612 481",
+  "M650 485 C610 482 577 482 569 492 C563 502 575 507 600 507 L648 507",
+  "M648 507 C612 507 581 509 577 519 C573 529 587 533 610 532 L650 531",
+  "M650 531 C620 533 593 535 591 544 C589 553 601 556 623 555 L652 553",
+  "M652 553 C632 556 613 559 613 567 C613 575 625 577 641 575 L662 573",
+  "M662 573 C700 582 742 587 800 592",
+  "M728 462 C722 500 724 550 738 598",                       // كمّ القميص
+  "M744 460 C738 500 740 552 754 600",
+];
+// خصلات الشعر الطويل (منحنيات متموجة)
+function hairPaths(){
+  const p = [];
+  // نقاط على محيط الرأس (من الأعلى إلى الخلف) تبدأ منها الخصلات
+  const starts = [[262,92],[238,90],[214,93],[192,101],[175,114],[163,132],[157,154],[154,178],[151,206],[148,238],[140,265]];
+  starts.forEach(([sx, sy], i) => {
+    const ex = 64 + (starts.length - 1 - i) * 15 + (i % 2) * 6, ey = 590 + (i % 3) * 32;
+    const c1x = sx - 24 - i * 3, c1y = sy + 170;
+    const c2x = ex + 40, c2y = ey - 200;
+    p.push(`M${sx} ${sy} C${c1x} ${c1y}, ${c2x} ${c2y}, ${ex} ${ey}`);
+  });
+  // خصلات تنزل من خلف الأذن فوق الكتف
+  for (let i = 0; i < 4; i++){
+    const sx = 232 + i * 9, sy = 244 + i * 4;
+    p.push(`M${sx} ${sy} C${sx + 16} ${sy + 110}, ${sx - 26} ${sy + 210}, ${sx + 4 + i * 4} ${sy + 330 - i * 20}`);
+  }
+  p.push("M282 112 C262 128 248 160 244 200");   // خصلات فوق الجبهة
+  p.push("M296 130 C278 146 266 172 262 202");
+  return p;
+}
+
+function drawArt(g){
+  g.strokeStyle = "#fff"; g.lineWidth = 2.6; g.lineCap = g.lineJoin = "round";
+  for (const d of hairPaths()) g.stroke(new Path2D(d));
+  // العصابة فوق الشعر: نمسح الشعر تحتها ثم نرسم باقي الخطوط
+  g.save();
+  g.globalCompositeOperation = "destination-out";
+  g.fill(new Path2D("M318 203 C280 195 230 190 176 196 C160 204 158 232 182 239 C235 233 285 236 327 240 Z"));
+  g.restore();
+  for (const d of ART) g.stroke(new Path2D(d));
+}
+
+function maskFromArt(){
+  const m = document.createElement("canvas"); m.width = W; m.height = H;
+  const g = m.getContext("2d");
+  g.translate(10, 0);
+  drawArt(g);
+  const d = g.getImageData(0, 0, W, H).data;
+  const a = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) a[i] = d[i * 4 + 3] > 90 ? 1 : 0;
+  return a;
+}
+
+// صورة خاصة: كشف الحواف (Sobel) مثل cv2.Canny في الكود الأصلي
+function maskFromImage(image){
+  const m = document.createElement("canvas"); m.width = W; m.height = H;
+  const g = m.getContext("2d");
+  g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
+  const s = Math.min(W / image.width, (H - 70) / image.height);
+  const iw = image.width * s, ih = image.height * s;
+  g.filter = "blur(1.2px)";
+  g.drawImage(image, (W - iw) / 2, (H - 70 - ih) / 2, iw, ih);
+  const d = g.getImageData(0, 0, W, H).data;
+  const L = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) L[i] = 0.299*d[i*4] + 0.587*d[i*4+1] + 0.114*d[i*4+2];
+  const a = new Uint8Array(W * H);
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++){
+    const o = y * W + x;
+    const gx = -L[o-W-1] - 2*L[o-1] - L[o+W-1] + L[o-W+1] + 2*L[o+1] + L[o+W+1];
+    const gy = -L[o-W-1] - 2*L[o-W] - L[o-W+1] + L[o+W-1] + 2*L[o+W] + L[o+W+1];
+    a[o] = Math.hypot(gx, gy) > EDGE_THRESH * 2 ? 1 : 0;
+  }
+  return a;
+}
+
+// ======================= الجزيئات =======================
+let N = 0, tx, ty, cr, cg, cb, x, y, vx, vy, fx, fy, delay, prog, tw, twMax;
+let minY = 0, spanY = 1;
+
+function build(mask){
+  let count = 0;
+  for (let i = 0; i < W * H; i++) count += mask[i];
+  const p = Math.min(0.95, MAX_PARTICLES / Math.max(1, count));
+  const pts = [];
+  for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++)
+    if (mask[yy * W + xx] && Math.random() < p) pts.push(xx + rand(-0.8, 0.8), yy + rand(-0.8, 0.8));
+  N = pts.length / 2;
+  const F = n => new Float32Array(n);
+  tx = F(N); ty = F(N); cr = F(N); cg = F(N); cb = F(N); x = F(N); y = F(N);
+  vx = F(N); vy = F(N); fx = F(N); fy = F(N); delay = F(N); prog = F(N); tw = F(N); twMax = F(N);
+  minY = H; let maxY = 0;
+  for (let i = 0; i < N; i++){
+    tx[i] = pts[i*2]; ty[i] = pts[i*2+1];
+    minY = Math.min(minY, ty[i]); maxY = Math.max(maxY, ty[i]);
+    const c = COLORS[(Math.random() * COLORS.length) | 0];
+    cr[i] = c[0]; cg[i] = c[1]; cb[i] = c[2];
+    x[i] = rand(W); y[i] = rand(H);
+  }
+  spanY = Math.max(1, maxY - minY);
+  setPhase("noise");
+}
+
+let phase = "noise", pt = 0, clock = 0;
+function setPhase(p){
+  phase = p; pt = 0;
+  if (p === "noise") for (let i = 0; i < N; i++){ const a = rand(Math.PI * 2), s = rand(0.1, 0.5); vx[i] = Math.cos(a) * s; vy[i] = Math.sin(a) * s; }
+  if (p === "form") for (let i = 0; i < N; i++){
+    const o = (ty[i] - minY) / spanY;
+    delay[i] = Math.max(0, (o * 0.7 + rand(-ORDER_JITTER, ORDER_JITTER) + 0.2) * FORM_SPREAD / 1.2);
+    prog[i] = 0;
+  }
+  if (p === "melt") for (let i = 0; i < N; i++){
+    delay[i] = rand(0, 1.2);
+    const a = rand(Math.PI * 2), s = rand(0.4, 2.2);
+    vx[i] = Math.cos(a) * s; vy[i] = Math.sin(a) * s - 0.3;
+  }
+}
+
+const ease = u => u < .5 ? 4*u*u*u : 1 - Math.pow(-2*u + 2, 3) / 2;
+
+function drift(i, f){                    // غبار يطفو ببطء
+  x[i] += vx[i] * f + Math.sin(clock * 0.9 + i) * 0.12 * f;
+  y[i] += vy[i] * f + Math.cos(clock * 0.7 + i * 1.3) * 0.12 * f;
+  if (x[i] < 0) x[i] += W; else if (x[i] >= W) x[i] -= W;
+  if (y[i] < 0) y[i] += H; else if (y[i] >= H) y[i] -= H;
+}
+
+function update(dt){
+  const f = dt * 60;
+  pt += dt; clock += dt;
+  if (phase === "noise"){
+    for (let i = 0; i < N; i++) drift(i, f);
+    if (pt > T.noise) setPhase("form");
+  } else if (phase === "form"){
+    for (let i = 0; i < N; i++){
+      const u = (pt - delay[i]) / FLY;
+      if (u <= 0){ drift(i, f); fx[i] = x[i]; fy[i] = y[i]; continue; }
+      const e = ease(Math.min(1, u));
+      // مسار منحنٍ قليلاً بدل الخط المستقيم
+      const bend = Math.sin(e * Math.PI) * 40 * Math.sin(i);
+      x[i] = fx[i] + (tx[i] - fx[i]) * e + bend;
+      y[i] = fy[i] + (ty[i] - fy[i]) * e - Math.abs(bend) * 0.4;
+      prog[i] = e;
+    }
+    if (pt > T.form) setPhase("hold");
+  } else {
+    for (let i = 0; i < N; i++){
+      if (phase === "melt" && pt > delay[i]){
+        vx[i] *= 1 + 0.01 * f; vy[i] += 0.01 * f;
+        x[i] += vx[i] * f; y[i] += vy[i] * f;
+        prog[i] = Math.max(0, prog[i] - dt * 0.7);
+        continue;
+      }
+      x[i] = tx[i] + Math.sin(clock * 2.0 + i * 1.7) * 0.35;
+      y[i] = ty[i] + Math.cos(clock * 1.6 + i * 2.3) * 0.35;
+      prog[i] = 1;
+    }
+    if (phase === "hold" && pt > T.hold) setPhase("melt");
+    else if (phase === "melt" && pt > T.melt){
+      for (let i = 0; i < N; i++){ x[i] = ((x[i] % W) + W) % W; y[i] = ((y[i] % H) + H) % H; }
+      setPhase("noise");
+    }
+  }
+  for (let k = 0; k < TWINKLES_PER_FRAME && N; k++){
+    const i = (Math.random() * N) | 0;
+    tw[i] = twMax[i] = rand(TWINKLE_LIFE[0], TWINKLE_LIFE[1]);
+  }
+  for (let i = 0; i < N; i++) if (tw[i] > 0) tw[i] = Math.max(0, tw[i] - f);
+}
+
+// نجوم ثابتة خافتة في الخلفية
+const stars = Array.from({ length: STARS }, () => ({ x: rand(W), y: rand(H), b: rand(0.25, 0.7), p: rand(6.28) }));
+
+// ======================= الرسم =======================
+const NOISE = [165, 155, 190];
+function render(){
+  px32.fill(BG32);
+  for (const s of stars){
+    const v = (s.b * (0.7 + 0.3 * Math.sin(clock * 1.5 + s.p)) * 255) | 0;
+    const o = (s.y | 0) * W + (s.x | 0);
+    px32[o] = (255 << 24) | (Math.min(255, v + 20) << 16) | (v << 8) | v;
+  }
+  for (let i = 0; i < N; i++){
+    const xi = x[i] | 0, yi = y[i] | 0;
+    if (xi < 0 || yi < 0 || xi >= W - 1 || yi >= H - 1) continue;
+    const p = prog[i];
+    let b = 0.45 + 0.55 * p;
+    let r = NOISE[0] + (cr[i] - NOISE[0]) * p, g = NOISE[1] + (cg[i] - NOISE[1]) * p, bl = NOISE[2] + (cb[i] - NOISE[2]) * p;
+    let big = false;
+    if (tw[i] > 0){
+      const s = Math.sin(Math.PI * tw[i] / twMax[i]);
+      r += (255 - r) * s; g += (255 - g) * s; bl += (255 - bl) * s; b = Math.min(1.3, b + 0.7 * s);
+      big = s > 0.6;
+    }
+    r = Math.min(255, r * b) | 0; g = Math.min(255, g * b) | 0; bl = Math.min(255, bl * b) | 0;
+    const c = (255 << 24) | (bl << 16) | (g << 8) | r, o = yi * W + xi;
+    px32[o] = c; px32[o + 1] = c; px32[o + W] = c; px32[o + W + 1] = c;
+    if (big && xi > 0 && yi > 0){ px32[o - 1] = c; px32[o - W] = c; }   // لمعة أكبر
+  }
+  bctx.putImageData(img, 0, 0);
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1; ctx.filter = "none";
+  ctx.drawImage(buf, 0, 0);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.5; ctx.filter = "blur(4px)";
+  ctx.drawImage(buf, 0, 0);
+  ctx.filter = "none";
+
+  let a = 0;
+  if (phase === "hold") a = Math.min(1, Math.max(0, (pt - 0.6) / 1.5));
+  if (phase === "melt") a = Math.max(0, 1 - pt / 0.8);
+  if (a > 0){
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = a;
+    ctx.font = 'italic 26px Georgia, "Times New Roman", serif';
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(255,180,215,0.8)"; ctx.shadowBlur = 14;
+    ctx.fillStyle = "#f8d6e4";
+    ctx.fillText(QUOTE, W / 2, H - 34);
+    ctx.shadowBlur = 0;
+  }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+}
+
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); render();
+  requestAnimationFrame(frame);
+}
+
+// ======================= التحكم =======================
+cv.addEventListener("click", () => setPhase("noise"));
+const file = document.getElementById("file");
+document.getElementById("pick").onclick = () => file.click();
+function loadFile(f){
+  if (!f || !f.type.startsWith("image/")) return;
+  const im = new Image();
+  im.onload = () => { build(maskFromImage(im)); URL.revokeObjectURL(im.src); };
+  im.src = URL.createObjectURL(f);
+}
+file.onchange = () => loadFile(file.files[0]);
+addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("drag"); });
+addEventListener("dragleave", () => document.body.classList.remove("drag"));
+addEventListener("drop", e => { e.preventDefault(); document.body.classList.remove("drag"); loadFile(e.dataTransfer.files[0]); });
+
+build(maskFromArt());
+requestAnimationFrame(frame);
+window.__dbg = { setPhase, drawArt, get phase(){ return phase; }, get N(){ return N; } };
+})();
+</script>
+</body>
+</html>

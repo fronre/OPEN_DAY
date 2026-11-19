@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASCII Mirror</title>
+<style>
+  :root{ --g:#35ff7a; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#020503;overflow:hidden;font-family:ui-monospace,Consolas,monospace;color:#7fe5a1}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  .bar{position:fixed;left:0;right:0;bottom:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding:0 12px}
+  button{font:inherit;font-size:13px;color:var(--g);background:rgba(2,12,6,.75);border:1px solid #1e6b3a;border-radius:999px;padding:8px 16px;cursor:pointer}
+  button:hover{border-color:var(--g)}
+  .msg{position:fixed;top:14px;left:0;right:0;text-align:center;font-size:13px;color:#4a9e68;pointer-events:none}
+  video{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<video id="v" playsinline muted></video>
+<div class="msg" id="msg">Allow the camera to see yourself in ASCII…</div>
+<div class="bar">
+  <button id="mode">Style: Matrix</button>
+  <button id="detail">Detail: Medium</button>
+  <button id="shot">📸 Save</button>
+</div>
+
+<script>
+(() => {
+const RAMP = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
+const MODES = ["Matrix", "Color", "Rainbow", "White"];
+const DETAILS = [[70, "Low"], [110, "Medium"], [160, "High"]];
+let mode = 0, detailIdx = 1, cols = 110, rows = 40, cw, ch;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const v = document.getElementById("v"), msg = document.getElementById("msg");
+const small = document.createElement("canvas"), sctx = small.getContext("2d", { willReadFrequently: true });
+let W, H, DPR, hasCam = false, demoT = 0;
+
+function layout(){
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  if (!W || !H) return;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cols = DETAILS[detailIdx][0];
+  cw = W / cols; ch = cw * 1.9;
+  rows = Math.max(1, Math.floor(H / ch));
+  small.width = cols; small.height = rows;
+}
+
+async function startCam(){
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    v.srcObject = s; await v.play(); hasCam = true; msg.textContent = "";
+  } catch (e) {
+    msg.textContent = "Camera not available — showing demo. Allow camera access and reload to see yourself.";
+  }
+}
+
+// عرض تجريبي عندما لا توجد كاميرا
+function drawDemo(t){
+  sctx.fillStyle = "#000"; sctx.fillRect(0, 0, cols, rows);
+  for (let i = 0; i < 5; i++){
+    const x = cols * (0.5 + 0.36 * Math.sin(t * (0.5 + i * 0.23) + i * 2)), y = rows * (0.5 + 0.34 * Math.cos(t * (0.4 + i * 0.19) + i));
+    const r = rows * (0.22 + 0.06 * Math.sin(t + i));
+    const g = sctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    sctx.fillStyle = g; sctx.fillRect(0, 0, cols, rows);
+  }
+}
+
+function frame(now){
+  if (!W || innerWidth !== W) layout();
+  if (!W){ requestAnimationFrame(frame); return; }
+  const t = now / 1000;
+  if (hasCam && v.videoWidth){
+    sctx.save(); sctx.translate(cols, 0); sctx.scale(-1, 1);        // مرآة
+    // قصّ الفيديو ليملأ الشاشة بنفس النسبة
+    const sr = v.videoWidth / v.videoHeight, dr = cols / rows;
+    let sw = v.videoWidth, sh = v.videoHeight, sx = 0, sy = 0;
+    if (sr > dr){ sw = sh * dr; sx = (v.videoWidth - sw) / 2; } else { sh = sw / dr; sy = (v.videoHeight - sh) / 2; }
+    sctx.drawImage(v, sx, sy, sw, sh, 0, 0, cols, rows);
+    sctx.restore();
+  } else drawDemo(t);
+  const d = sctx.getImageData(0, 0, cols, rows).data;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#020503"; ctx.fillRect(0, 0, W, H);
+  ctx.font = `700 ${ch * 0.92}px ui-monospace, Consolas, "Courier New", monospace`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let y = 0; y < rows; y++){
+    for (let x = 0; x < cols; x++){
+      const i = (y * cols + x) * 4, r = d[i], g = d[i + 1], b = d[i + 2];
+      let l = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      l = Math.min(1, Math.max(0, (l - 0.08) * 1.35));
+      if (l < 0.05) continue;
+      const c = RAMP[(l * (RAMP.length - 1)) | 0];
+      if (mode === 0) ctx.fillStyle = `rgb(${(l * 90) | 0},${(70 + l * 185) | 0},${(l * 110) | 0})`;
+      else if (mode === 1) ctx.fillStyle = `rgb(${Math.min(255, r * 1.3) | 0},${Math.min(255, g * 1.3) | 0},${Math.min(255, b * 1.3) | 0})`;
+      else if (mode === 2) ctx.fillStyle = `hsl(${(x / cols * 360 + t * 60) % 360} 90% ${35 + l * 45}%)`;
+      else { const k = (60 + l * 195) | 0; ctx.fillStyle = `rgb(${k},${k},${k})`; }
+      ctx.fillText(c, x * cw + cw / 2, y * ch + ch / 2);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+document.getElementById("mode").onclick = e => { mode = (mode + 1) % MODES.length; e.target.textContent = "Style: " + MODES[mode]; };
+document.getElementById("detail").onclick = e => { detailIdx = (detailIdx + 1) % DETAILS.length; layout(); e.target.textContent = "Detail: " + DETAILS[detailIdx][1]; };
+document.getElementById("shot").onclick = () => { const a = document.createElement("a"); a.download = "ascii-me.png"; a.href = cv.toDataURL("image/png"); a.click(); };
+addEventListener("resize", layout);
+layout(); startCam(); requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

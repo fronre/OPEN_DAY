@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>I Love You Heart</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#000;
+    --pink:#ea80b0;
+    --pink-soft:#e7b6d0;
+    --frame:#d8c3d0;
+    --text:#ffffff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text)}
+  body{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:clamp(16px,3vh,28px);padding:16px;min-height:100vh;
+    font-family:"Outfit",system-ui,sans-serif;
+  }
+  h1{margin:0;font-weight:500;font-size:clamp(24px,4.4vw,40px);letter-spacing:.5px;text-align:center}
+  h1 span{color:var(--pink-soft)}
+  .frame{
+    width:min(92vw,820px,calc((100vh - 140px) * 4 / 3));
+    aspect-ratio:4/3;
+    border:clamp(4px,.7vw,7px) solid var(--frame);
+    background:#000;
+    cursor:pointer;
+  }
+  canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+  <h1><span>Love Heart</span> Animation</h1>
+  <div class="frame" title="Click to pause / play"><canvas id="c"></canvas></div>
+
+<script>
+(() => {
+  // ================= settings =================
+  const WORD    = "I love you";
+  const COLOR   = "#ea80b0";
+  const GLOW    = "#ffffff";
+  const ANGLE   = -30 * Math.PI / 180;   // كل كلمة مائلة -30 درجة (مثل الأصل)
+  const LAYERS  = 4;                     // طبقات العمق (سُمك القلب ثلاثي الأبعاد)
+  const SPEED   = 0.9;                    // سرعة جريان الكلمات (كلمات / ثانية)
+
+  const cv = document.getElementById("c");
+  const ctx = cv.getContext("2d");
+  let W, H, DPR, S, F, CX, CY, sprite, spW, spH, table, L, count, gap;
+  let t0 = performance.now(), paused = false, pauseAt = 0, offset = 0;
+
+  // -------- heart curve (canvas coords: y down) --------
+  function heart(t){
+    const x = 16 * Math.sin(t) ** 3;
+    const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
+    return [x, -y];
+  }
+
+  // جدول طول القوس: لتوزيع الكلمات بمسافات متساوية على طول القلب
+  function buildTable(){
+    const M = 3000;
+    table = new Float64Array(M + 1);
+    let [px, py] = heart(0), acc = 0;
+    table[0] = 0;
+    for (let i = 1; i <= M; i++){
+      const [x, y] = heart(i / M * Math.PI * 2);
+      acc += Math.hypot(x - px, y - py);
+      table[i] = acc; px = x; py = y;
+    }
+    L = acc;
+  }
+  function pointAt(u){                // u في [0,1) نسبة من طول القلب
+    const target = ((u % 1) + 1) % 1 * L;
+    let lo = 0, hi = table.length - 1;
+    while (hi - lo > 1){ const m = (lo + hi) >> 1; table[m] < target ? lo = m : hi = m; }
+    const f = (target - table[lo]) / (table[hi] - table[lo] || 1);
+    const t = (lo + f) / (table.length - 1) * Math.PI * 2;
+    return heart(t);
+  }
+
+  // كلمة "I love you" مرسومة مرة واحدة مع التوهّج الأبيض ثم تُعاد استخدامها
+  function buildSprite(){
+    const fs = F * DPR * 1.6;         // دقة أعلى من حجم العرض للحدة
+    const c = document.createElement("canvas");
+    const g = c.getContext("2d");
+    const font = `500 ${fs}px Outfit, system-ui, sans-serif`;
+    g.font = font;
+    g.letterSpacing = (2 * DPR * 1.6) + "px";
+    const w = g.measureText(WORD).width + 2 * DPR * 1.6 * WORD.length;
+    const pad = fs * 0.9;
+    c.width = Math.ceil(w + pad * 2);
+    c.height = Math.ceil(fs * 1.25 + pad * 2);
+    g.font = font;
+    g.letterSpacing = (2 * DPR * 1.6) + "px";
+    g.textBaseline = "middle";
+    g.fillStyle = COLOR;
+    g.shadowColor = "rgba(255,255,255,0.75)";
+    g.shadowBlur = fs * 0.28;                    // توهّج خفيف لا يطمس الحروف
+    g.fillText(WORD, pad, c.height / 2);
+    g.shadowBlur = 0;
+    g.fillText(WORD, pad, c.height / 2);
+    sprite = c;
+    spW = c.width / (DPR * 1.6);
+    spH = c.height / (DPR * 1.6);
+    sprite.pad = pad / (DPR * 1.6);
+  }
+
+  function resize(){
+    const r = cv.getBoundingClientRect();
+    DPR = Math.min(window.devicePixelRatio || 1, 2.5);
+    W = r.width; H = r.height;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    S = Math.min(W / 46, H / 40);    // بكسل لكل وحدة من معادلة القلب
+    F = S * 1.12;                     // حجم الخط
+    buildSprite();
+    gap = F * 1.55;                  // المسافة بين الكلمات على المسار
+    count = Math.max(24, Math.round(L * S / gap));
+    // الكلمات تمتد لليمين فنزيح القلب لليسار قليلاً ليبقى المشهد في الوسط
+    const wordW = spW - 2 * sprite.pad;
+    CX = W / 2 - wordW * Math.cos(ANGLE) * 0.42;
+    // القلب يمتد من -12 إلى +17 وحدة رأسياً -> نوسّطه، والكلمات تصعد لأعلى فننزله قليلاً
+    CY = H / 2 - S * 2.5 - wordW * Math.sin(ANGLE) * 0.3;
+  }
+
+  function frame(now){
+    const time = (paused ? pauseAt : now - t0) / 1000;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height);
+
+    // دوران ثلاثي الأبعاد هادئ + نبض خفيف
+    const yaw   = Math.sin(time * 0.55) * 0.42;
+    const pitch = Math.sin(time * 0.37 + 1) * 0.12;
+    const beat  = 1 + 0.025 * Math.sin(time * 2.4);
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    const depth = S * 3.2, D = S * 60;
+    const flow = time * SPEED / count;        // كم تحرّكت الكلمات على المسار
+
+    const items = [];
+    for (let l = 0; l < LAYERS; l++){
+      const z0 = (l / (LAYERS - 1) - 0.5) * depth * 2;
+      for (let k = 0; k < count; k++){
+        const [hx, hy] = pointAt(k / count - flow);
+        let x = hx * S * beat, y = hy * S * beat, z = z0;
+        // rotate Y then X
+        let x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+        let y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+        const f = D / (D + z2);
+        items.push({ X: CX + x1 * f, Y: CY + y1 * f, f, z: z2, l });
+      }
+    }
+    items.sort((a, b) => b.z - a.z);         // الأبعد أولاً
+
+    const zMax = depth * 1.3;
+    for (const it of items){
+      const near = 0.5 - it.z / (2 * zMax);  // 0 بعيد … 1 قريب
+      // كلمات شفافة: الطبقات الخلفية تظهر من خلال الأمامية
+      ctx.globalAlpha = Math.max(0.28, Math.min(0.8, 0.3 + near * 0.5));
+      const s = it.f * DPR;
+      ctx.setTransform(s * Math.cos(ANGLE), s * Math.sin(ANGLE),
+                       -s * Math.sin(ANGLE), s * Math.cos(ANGLE),
+                       it.X * DPR, it.Y * DPR);
+      // مثل translateY(-100%): أسفل-يسار الكلمة على نقطة المسار
+      ctx.drawImage(sprite, -sprite.pad, -spH + sprite.pad * 0.6, spW, spH);
+    }
+    ctx.globalAlpha = 1;
+    requestAnimationFrame(frame);
+  }
+
+  cv.parentElement.addEventListener("click", () => {
+    const now = performance.now();
+    if (paused){ t0 = now - pauseAt; paused = false; }
+    else { pauseAt = now - t0; paused = true; }
+  });
+
+  buildTable();
+  const start = () => { resize(); requestAnimationFrame(frame); };
+  addEventListener("resize", resize);
+  (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(start);
+})();
+</script>
+</body>
+</html>

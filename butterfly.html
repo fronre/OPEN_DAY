@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neon Butterfly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  canvas{position:fixed;inset:0;width:100%;height:100%;cursor:pointer}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<script>
+(() => {
+// ======================= settings =======================
+const N = 1400;            // عدد الخطوات
+const LOOPS = 6;           // كم مرة يُرسم المنحنى
+const SUB = 4;             // نقاط فرعية لكل خطوة
+const SPEED = 110;         // خطوات في الثانية
+const RAY_EVERY = 3, DOT_EVERY = 7;
+const HOLD = 3.2, FADE = 1.4;   // ثبات الفراشة المكتملة ثم الاختفاء قبل إعادة الرسم
+
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const trail = document.createElement("canvas"), tctx = trail.getContext("2d");
+let W, H, DPR, U, CX, CY, drawn = 0, prog = 0, phase = "draw", pt = 0, stars = [];
+const TAU = Math.PI * 2;
+
+function curve(k){
+  const t = k / N * LOOPS * TAU;
+  const r = Math.exp(Math.cos(t)) - 2 * Math.cos(4 * t);
+  const s = 0.62 + 0.38 * (0.5 + 0.5 * Math.cos(TAU * k / N));
+  return [r * Math.sin(t) * s, r * Math.cos(t) * s];
+}
+const hue = k => ((0.02 + 0.90 * k / N) % 1) * 360;
+const P = xy => [CX + xy[0] * U, CY - xy[1] * U];
+
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  if (!W || !H) return;
+  for (const c of [cv, trail]){ c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  U = Math.min(H * 0.155 * 1.12, W * 0.155 * 1.12 * 1.05) * 1;
+  U = Math.min(H / 6.4, W / 6.9);
+  CX = W / 2; CY = H * 0.56;
+  stars = Array.from({ length: 220 }, (_, i) => ({ x: Math.random() * W, y: Math.random() * H, r: Math.random() * 1.4 + .3, p: Math.random() * 6.28, s: .6 + Math.random() * 1.6 }));
+  restart();
+}
+function restart(){ tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, trail.width, trail.height); drawn = 0; prog = 0; phase = "draw"; pt = 0; }
+
+// رسم خطوة واحدة على لوحة الأثر (توهج بثلاث طبقات + شعاع + نقطة)
+function step(i){
+  tctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  tctx.globalCompositeOperation = "lighter";
+  tctx.lineCap = tctx.lineJoin = "round";
+  const pts = [];
+  for (let j = 0; j <= SUB; j++) pts.push(P(curve(i + j / SUB)));
+  const h = hue(i + 0.5), path = new Path2D();
+  path.moveTo(pts[0][0], pts[0][1]);
+  for (let j = 1; j <= SUB; j++) path.lineTo(pts[j][0], pts[j][1]);
+  if (i % RAY_EVERY === 0){
+    tctx.strokeStyle = `hsla(${h} 90% 55% / .30)`; tctx.lineWidth = 0.7;
+    tctx.beginPath(); tctx.moveTo(CX, CY); tctx.lineTo(pts[SUB][0], pts[SUB][1]); tctx.stroke();
+  }
+  tctx.strokeStyle = `hsla(${h} 100% 55% / .16)`; tctx.lineWidth = U * 0.085; tctx.stroke(path);
+  tctx.strokeStyle = `hsla(${h} 100% 60% / .38)`; tctx.lineWidth = U * 0.042; tctx.stroke(path);
+  tctx.strokeStyle = `hsl(${h} 100% 72%)`;        tctx.lineWidth = Math.max(1.4, U * 0.017); tctx.stroke(path);
+  if (i % DOT_EVERY === 0){
+    const [x, y] = pts[0];
+    tctx.fillStyle = `hsla(${h} 100% 65% / .9)`; tctx.beginPath(); tctx.arc(x, y, U * 0.026, 0, TAU); tctx.fill();
+    tctx.fillStyle = "#fff"; tctx.beginPath(); tctx.arc(x, y, U * 0.011, 0, TAU); tctx.fill();
+  }
+}
+
+let last = performance.now(), t = 0;
+function frame(now){
+  const dt = Math.min(.05, (now - last) / 1000); last = now; t += dt;
+  if (!W || innerWidth !== W) resize();
+  if (!W){ requestAnimationFrame(frame); return; }
+
+  if (phase === "draw"){
+    prog = Math.min(N, prog + dt * SPEED);
+    while (drawn < Math.floor(prog)) step(drawn++);
+    if (drawn >= N){ phase = "hold"; pt = 0; }
+  } else { pt += dt; if (phase === "hold" && pt > HOLD){ phase = "fade"; pt = 0; } else if (phase === "fade" && pt > FADE) restart(); }
+  const alpha = phase === "fade" ? Math.max(0, 1 - pt / FADE) : 1;
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "#05060a"; ctx.fillRect(0, 0, W, H);
+  for (const s of stars){ ctx.globalAlpha = (.25 + .45 * Math.abs(Math.sin(t * s.s + s.p))) * (phase === "fade" ? .6 + .4 * alpha : 1); ctx.fillStyle = "#dfe6ff"; ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill(); }
+  ctx.globalAlpha = alpha;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(trail, 0, 0);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+  // الرأس المضيء
+  if (phase === "draw"){
+    const [x, y] = P(curve(prog)), g = ctx.createRadialGradient(x, y, 0, x, y, U * .12);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(.25, "rgba(255,255,255,.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, U * .12, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+  // النصوص
+  ctx.globalAlpha = 1;
+  const wide = W / H > 1.5, tx = wide ? 28 : W / 2, ty = wide ? 44 : H * .075;
+  ctx.textAlign = wide ? "left" : "center";
+  ctx.fillStyle = "#fff"; ctx.font = `600 ${Math.max(18, Math.min(U * .3, 34))}px Outfit, "Segoe UI", sans-serif`; ctx.fillText("Butterfly Curve", tx, ty);
+  ctx.fillStyle = "#a5acbe"; ctx.font = `400 ${Math.max(12, Math.min(U * .13, 16))}px Outfit, "Segoe UI", sans-serif`; ctx.fillText("with Neon Trails", tx, ty + Math.max(20, Math.min(U * .24, 26)));
+  ctx.textAlign = "right"; ctx.fillStyle = "#8c92a2"; ctx.font = `${Math.max(11, U * .11)}px Consolas, ui-monospace, monospace`;
+  ctx.fillText(`i = ${String(Math.min(N, drawn)).padStart(4, " ")}/${N}`, W - 22, H - 18);
+  ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+cv.addEventListener("click", restart);
+addEventListener("resize", resize);
+(document.fonts && document.fonts.load ? document.fonts.load('600 40px Outfit') : Promise.resolve()).catch(() => {}).then(() => { resize(); requestAnimationFrame(frame); });
+window.__dbg = { skip: n => { prog = Math.min(N, prog + n); while (drawn < Math.floor(prog)) step(drawn++); if (drawn >= N){ phase = "hold"; pt = 0; } }, get phase(){ return phase; }, restart };
+})();
+</script>
+</body>
+</html>

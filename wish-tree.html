@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wish Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{ --pink:#f6c9d8; --gold:#ffe6a8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;color:#fff;font-family:Outfit,system-ui,sans-serif;background:#050818}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  h1{position:fixed;top:14px;left:0;right:0;margin:0;text-align:center;font-weight:600;font-size:clamp(20px,3.4vw,32px);letter-spacing:1px;pointer-events:none;
+     text-shadow:0 0 20px rgba(255,200,230,.4)}
+  h1 small{display:block;font-weight:400;font-size:13px;color:#8b92c9;margin-top:4px;letter-spacing:.5px}
+  form{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:flex;gap:8px;flex-wrap:wrap;justify-content:center;
+       width:min(94vw,640px);padding:10px;border-radius:22px;background:rgba(8,10,34,.72);border:1px solid #2c3270;backdrop-filter:blur(6px)}
+  input{flex:1 1 150px;min-width:0;padding:11px 16px;border-radius:999px;border:1px solid #3d4390;background:rgba(10,12,40,.8);color:#fff;font:inherit;outline:none}
+  input.w{flex:3 1 240px}
+  input:focus{border-color:var(--pink)}
+  button{font:inherit;font-weight:600;color:#2a1730;background:linear-gradient(135deg,#ffd6ea,#ffe8b0);border:0;border-radius:999px;padding:0 20px;cursor:pointer;min-height:42px}
+  .tip{position:fixed;pointer-events:none;max-width:260px;padding:10px 14px;border-radius:14px;background:rgba(12,14,46,.92);border:1px solid #ffe6a8aa;
+       font-size:14px;line-height:1.4;transform:translate(-50%,-100%);opacity:0;transition:opacity .15s}
+  .tip b{color:var(--gold);display:block;font-size:12px;margin-bottom:3px;font-weight:600}
+  .count{position:fixed;right:16px;top:16px;font-size:13px;color:#8b92c9;text-align:right}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<h1>Wish Tree<small>Hang your wish on the tree — hover a glowing leaf to read it</small></h1>
+<div class="count" id="count"></div>
+<div class="tip" id="tip"></div>
+<form id="f" autocomplete="off">
+  <input id="who" maxlength="20" placeholder="Your name (optional)">
+  <input id="wish" class="w" maxlength="90" placeholder="Write your wish…" required>
+  <button>Hang it ✨</button>
+</form>
+
+<script>
+(() => {
+const KEY = "open-day-wish-tree-v1";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const tip = document.getElementById("tip"), countEl = document.getElementById("count");
+let W, H, DPR, U, OX, OY;                       // U: وحدة التحجيم، (OX,OY): جذر الشجرة
+const TAU = Math.PI * 2;
+function rng(seed){ return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ---- بناء الشجرة (ثابتة بسبب seed)
+const branches = [], tips = [];
+(function build(){
+  const R = rng(11);
+  (function grow(x, y, a, len, depth, parentOrder){
+    const x2 = x + Math.sin(a) * len, y2 = y - Math.cos(a) * len;
+    const order = parentOrder + 1;
+    branches.push({ x, y, x2, y2, depth, w: Math.max(0.0025, 0.03 * Math.pow(0.7, depth)), order });
+    if (depth >= 8){ tips.push({ x: x2, y: y2, a }); return; }
+    const kids = depth < 2 ? 2 : (R() < .28 ? 3 : 2);
+    for (let k = 0; k < kids; k++){
+      const spread = (k - (kids - 1) / 2) * (0.5 + R() * .25) + (R() - .5) * .25;
+      grow(x2, y2, a + spread, len * (0.74 + R() * .08), depth + 1, order);
+    }
+  })(0, 0, 0, 0.34, 0, 0);
+})();
+const maxDepth = Math.max(...branches.map(b => b.depth));
+
+// ---- الأمنيات
+let wishes = [];
+try { wishes = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) {}
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(wishes)); } catch (e) {} }
+function freeTip(){
+  const used = new Set(wishes.map(w => w.tip));
+  const free = tips.map((_, i) => i).filter(i => !used.has(i));
+  const pool = free.length ? free : tips.map((_, i) => i);
+  return pool[(Math.random() * pool.length) | 0];
+}
+function updateCount(){ countEl.textContent = wishes.length ? `${wishes.length} wish${wishes.length > 1 ? "es" : ""} hanging` : "Be the first to hang a wish"; }
+
+// ---- خلفية: نجوم وبتلات
+const stars = Array.from({ length: 140 }, () => ({ x: Math.random(), y: Math.random() * .8, r: Math.random() * 1.3 + .3, p: Math.random() * 6.28 }));
+const petals = Array.from({ length: 36 }, () => ({ x: Math.random(), y: Math.random(), v: .02 + Math.random() * .04, s: 2 + Math.random() * 3, p: Math.random() * 6.28 }));
+const ambient = tips.map(() => Math.random());     // أوراق خافتة على كل الأطراف
+
+function resize(){
+  DPR = Math.min(devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  U = Math.min(H * 0.95, W * 0.95) * 0.66 / 1.35;
+  OX = W / 2; OY = H * 0.86;
+}
+const P = (x, y) => [OX + x * U, OY + y * U];
+
+let t0 = performance.now(), hover = -1, mouse = { x: -1, y: -1 };
+const GROW = 6.5;                                  // مدة نمو الشجرة (ث)
+function frame(now){
+  const t = (now - t0) / 1000;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, "#050818"); sky.addColorStop(.7, "#14123a"); sky.addColorStop(1, "#2a1a46");
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  for (const s of stars){ ctx.globalAlpha = .3 + .5 * Math.abs(Math.sin(t * .8 + s.p)); ctx.fillStyle = "#dfe6ff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, TAU); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  // القمر
+  const mx = W * .82, my = H * .2, mr = Math.min(W, H) * .05;
+  const mg = ctx.createRadialGradient(mx, my, mr * .6, mx, my, mr * 4); mg.addColorStop(0, "rgba(255,236,200,.35)"); mg.addColorStop(1, "rgba(255,236,200,0)");
+  ctx.fillStyle = mg; ctx.fillRect(mx - mr * 4, my - mr * 4, mr * 8, mr * 8);
+  ctx.fillStyle = "#fff2d4"; ctx.beginPath(); ctx.arc(mx, my, mr, 0, TAU); ctx.fill();
+  // الأرض
+  const gg = ctx.createRadialGradient(OX, OY, 0, OX, OY, U * 1.1); gg.addColorStop(0, "rgba(255,190,230,.25)"); gg.addColorStop(1, "rgba(255,190,230,0)");
+  ctx.fillStyle = gg; ctx.fillRect(0, OY - U * .3, W, U * 1.2);
+  ctx.fillStyle = "#0b0a22"; ctx.beginPath(); ctx.ellipse(OX, OY + 6, U * .9, U * .07, 0, 0, TAU); ctx.fill();
+
+  // الأغصان (تنمو حسب العمق)
+  ctx.lineCap = "round";
+  for (const b of branches){
+    const p = Math.min(1, Math.max(0, (t - b.depth * 0.62) / 0.7));
+    if (p <= 0) continue;
+    const [x1, y1] = P(b.x, b.y), x2 = x1 + (P(b.x2, b.y2)[0] - x1) * p, y2 = y1 + (P(b.x2, b.y2)[1] - y1) * p;
+    ctx.strokeStyle = `hsl(${22 - b.depth * 1.5} ${30 + b.depth * 2}% ${18 + b.depth * 3.2}%)`;
+    ctx.lineWidth = Math.max(1, b.w * U * (0.5 + 0.5 * p));
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  }
+  // الأوراق الخافتة (زهر) بعد اكتمال النمو
+  const bloom = Math.min(1, Math.max(0, (t - (maxDepth * .62 + .3)) / 1.6));
+  if (bloom > 0) tips.forEach((tp, i) => {
+    const [x, y] = P(tp.x, tp.y), tw = .6 + .4 * Math.sin(t * 1.6 + ambient[i] * 20);
+    for (let k = 0; k < 5; k++){
+      const a = k / 5 * TAU + ambient[i] * 6, rr = U * .016 * bloom;
+      ctx.globalAlpha = .6 * bloom * (.55 + .45 * tw);
+      ctx.fillStyle = `hsl(${325 + ambient[i] * 25} 70% ${62 + ambient[i] * 14}%)`;
+      ctx.beginPath(); ctx.arc(x + Math.cos(a) * rr, y + Math.sin(a) * rr, U * .0075 * bloom, 0, TAU); ctx.fill();
+    }
+  });
+  // الأمنيات المتوهجة
+  ctx.globalCompositeOperation = "lighter";
+  hover = -1; let best = 26;
+  wishes.forEach((w, i) => {
+    const tp = tips[w.tip]; if (!tp || bloom < .3) return;
+    const [x, y] = P(tp.x, tp.y), pulse = .75 + .25 * Math.sin(t * 2.4 + i);
+    const d = Math.hypot(mouse.x - x, mouse.y - y); if (d < best){ best = d; hover = i; }
+    const r = U * .055 * (hover === i ? 1.4 : 1) * pulse;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.6);
+    g.addColorStop(0, "rgba(255,244,200,.95)"); g.addColorStop(.25, "rgba(255,214,150,.6)"); g.addColorStop(1, "rgba(255,200,120,0)");
+    ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 2.6, 0, TAU); ctx.fill();
+    ctx.fillStyle = "#fffdf0"; ctx.beginPath(); ctx.arc(x, y, r * .35, 0, TAU); ctx.fill();
+  });
+  // بتلات تتساقط
+  for (const p of petals){
+    p.y += p.v * .016; p.x += Math.sin(t * .6 + p.p) * .0004; if (p.y > 1.02){ p.y = -.02; p.x = Math.random(); }
+    ctx.globalAlpha = .55; ctx.fillStyle = "#ffc2dc"; ctx.beginPath(); ctx.ellipse(p.x * W, p.y * H, p.s, p.s * .55, p.p + t * .8, 0, TAU); ctx.fill();
+  }
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+
+  // التلميح
+  if (hover >= 0){
+    const w = wishes[hover], tp = tips[w.tip], [x, y] = P(tp.x, tp.y);
+    tip.innerHTML = `<b></b><span></span>`; tip.firstChild.textContent = w.name || "Someone"; tip.lastChild.textContent = w.text;
+    tip.style.left = Math.min(W - 140, Math.max(140, x)) + "px"; tip.style.top = (y - 26) + "px"; tip.style.opacity = 1;
+  } else tip.style.opacity = 0;
+  requestAnimationFrame(frame);
+}
+
+addEventListener("pointermove", e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+addEventListener("resize", resize);
+document.getElementById("f").addEventListener("submit", e => {
+  e.preventDefault();
+  const text = document.getElementById("wish").value.trim(); if (!text) return;
+  wishes.push({ name: document.getElementById("who").value.trim(), text, tip: freeTip(), at: Date.now() });
+  save(); updateCount(); document.getElementById("wish").value = "";
+  if (performance.now() - t0 < GROW * 1000) t0 = performance.now() - GROW * 1000;
+});
+resize(); updateCount(); requestAnimationFrame(frame);
+window.__dbg = { skip: s => t0 -= s * 1000, wishes: () => wishes.length, pos: i => P(tips[wishes[i].tip].x, tips[wishes[i].tip].y) };
+})();
+</script>
+</body>
+</html>

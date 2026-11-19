@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Code Typing Challenge</title>
+<style>
+  :root{ --bg:#0d1020; --panel:#141830; --line:#262c55; --ink:#d7dcff; --dim:#5d658f; --ok:#6ee7a8; --bad:#ff6b8b; --acc:#ffd166; --pink:#f6c9d8; }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;background:radial-gradient(circle at 30% 0%,#1b2150,#0d1020 55%);color:var(--ink);font-family:Outfit,system-ui,"Segoe UI",sans-serif}
+  .wrap{max-width:1040px;margin:0 auto;padding:26px 18px;display:grid;grid-template-columns:1fr 290px;gap:18px}
+  @media (max-width:860px){ .wrap{grid-template-columns:1fr} }
+  h1{grid-column:1/-1;margin:0 0 4px;font-size:clamp(22px,3.4vw,34px);font-weight:700}
+  h1 span{color:var(--pink)}
+  .sub{grid-column:1/-1;margin:-6px 0 6px;color:var(--dim);font-size:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+  .stats{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .stat{flex:1 1 90px;background:#0f1330;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .stat small{display:block;color:var(--dim);font-size:11px;letter-spacing:1px;text-transform:uppercase}
+  .stat b{font-size:24px;font-variant-numeric:tabular-nums}
+  .code{font:500 clamp(15px,2.2vw,21px)/1.7 ui-monospace,Consolas,"Courier New",monospace;background:#0a0d22;border:1px solid var(--line);border-radius:12px;padding:20px;
+        min-height:110px;word-break:break-all;position:relative;cursor:text}
+  .code span{color:#4f587f}
+  .code .ok{color:var(--ok)} .code .bad{color:#fff;background:var(--bad);border-radius:3px}
+  .code .cur{background:rgba(255,209,102,.28);box-shadow:0 0 0 1px var(--acc) inset;border-radius:3px;color:#fff}
+  #in{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:text;border:0}
+  .row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;align-items:center}
+  button{font:inherit;font-weight:600;color:#241530;background:linear-gradient(135deg,#ffd6ea,#ffe8b0);border:0;border-radius:999px;padding:10px 20px;cursor:pointer}
+  button.ghost{color:var(--pink);background:transparent;border:1px solid var(--line)}
+  .hint{color:var(--dim);font-size:13px}
+  .res{display:none;margin-top:16px;padding:16px;border-radius:14px;background:#10163a;border:1px solid var(--acc)}
+  .res.show{display:block}
+  .res h2{margin:0 0 6px;font-size:20px;color:var(--acc)}
+  .res input{padding:10px 14px;border-radius:999px;border:1px solid var(--line);background:#0a0d22;color:var(--ink);font:inherit;width:190px;outline:none}
+  .res input:focus{border-color:var(--pink)}
+  ol{margin:0;padding:0;list-style:none;counter-reset:r}
+  li{display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid #1d2248;counter-increment:r;font-size:15px}
+  li::before{content:counter(r);width:24px;height:24px;border-radius:50%;background:#1d2248;display:grid;place-items:center;font-size:12px;color:var(--dim);flex:none}
+  li:nth-child(1)::before{background:#ffd166;color:#3a2a00} li:nth-child(2)::before{background:#cfd6e8;color:#222} li:nth-child(3)::before{background:#e0a070;color:#2a1500}
+  li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} li b{color:var(--ok)} li small{color:var(--dim)}
+  h3{margin:0 0 8px;font-size:15px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)}
+  .empty{color:var(--dim);font-size:14px;padding:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Code Typing <span>Challenge</span></h1>
+  <p class="sub">Type the line exactly as shown — the timer starts on your first key. Mistakes count against your accuracy.</p>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat"><small>Time</small><b id="time">0.0s</b></div>
+      <div class="stat"><small>WPM</small><b id="wpm">0</b></div>
+      <div class="stat"><small>Accuracy</small><b id="acc">100%</b></div>
+      <div class="stat"><small>Errors</small><b id="err">0</b></div>
+    </div>
+    <div class="code" id="code"><input id="in" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Type here"></div>
+    <div class="row">
+      <button class="ghost" id="next">New line</button>
+      <span class="hint">Click the code and start typing · <kbd>Esc</kbd> = new line</span>
+    </div>
+    <div class="res" id="res">
+      <h2 id="rt">Nice!</h2>
+      <div id="rs" class="hint" style="margin-bottom:10px"></div>
+      <form id="sf" class="row" style="margin:0"><input id="nm" maxlength="18" placeholder="Your name" required><button>Save score</button></form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🏆 Leaderboard</h3>
+    <ol id="lb"></ol>
+    <div class="empty" id="lbe">No scores yet — be the first!</div>
+  </div>
+</div>
+
+<script>
+(() => {
+const KEY = "open-day-typing-v1";
+const SN = [
+  'const heart = (t) => 16 * Math.sin(t) ** 3;',
+  'for (let i = 0; i < 10; i++) console.log("Open Day " + i);',
+  'document.querySelector("#btn").addEventListener("click", () => alert("Hi!"));',
+  'def greet(name): return f"Welcome to Open Day, {name}!"',
+  'const total = [1, 2, 3, 4].reduce((a, b) => a + b, 0);',
+  'fetch("/api/visitors").then(r => r.json()).then(console.log);',
+  'print("".join(sorted(set("open day"))))',
+  'const sleep = ms => new Promise(res => setTimeout(res, ms));',
+  'let wishes = JSON.parse(localStorage.getItem("wishes") || "[]");',
+  'if (score > best) { best = score; console.log("New record!"); }'
+];
+const $ = id => document.getElementById(id);
+const code = $("code"), inp = $("in");
+let text = "", start = 0, errors = 0, keys = 0, finished = false, timer = 0, last = -1, board = [], result = null;
+try { board = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) {}
+
+function pick(){ let i; do i = (Math.random() * SN.length) | 0; while (i === last && SN.length > 1); last = i; return SN[i]; }
+function esc(c){ return c.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+function reset(){
+  text = pick(); start = 0; errors = 0; keys = 0; finished = false; result = null; clearInterval(timer);
+  inp.value = ""; $("res").classList.remove("show"); inp.disabled = false;
+  stats(); render(); inp.focus();
+}
+function render(){
+  const v = inp.value; let h = "";
+  for (let i = 0; i < text.length; i++){
+    const ch = esc(text[i] === " " ? " " : text[i]);
+    if (i < v.length) h += `<span class="${v[i] === text[i] ? "ok" : "bad"}">${ch}</span>`;
+    else if (i === v.length) h += `<span class="cur">${ch}</span>`;
+    else h += `<span>${ch}</span>`;
+  }
+  code.firstElementChild.insertAdjacentHTML("beforebegin", ""); // keep input
+  [...code.childNodes].forEach(n => { if (n !== inp) code.removeChild(n); });
+  code.insertAdjacentHTML("afterbegin", h);
+}
+function stats(){
+  const sec = start ? (performance.now() - start) / 1000 : 0;
+  const correct = [...inp.value].filter((c, i) => c === text[i]).length;
+  const wpm = sec > 0.5 ? Math.round(correct / 5 / (sec / 60)) : 0;
+  const acc = keys ? Math.max(0, Math.round((keys - errors) / keys * 100)) : 100;
+  $("time").textContent = sec.toFixed(1) + "s"; $("wpm").textContent = wpm; $("acc").textContent = acc + "%"; $("err").textContent = errors;
+  return { sec, wpm, acc };
+}
+inp.addEventListener("input", e => {
+  if (finished) return;
+  if (!start){ start = performance.now(); timer = setInterval(stats, 100); }
+  if (inp.value.length > text.length) inp.value = inp.value.slice(0, text.length);
+  const n = inp.value.length;
+  if (e.inputType && e.inputType.startsWith("insert") && n > 0){ keys++; if (inp.value[n - 1] !== text[n - 1]) errors++; }
+  render(); stats();
+  if (inp.value === text) finish();
+});
+inp.addEventListener("paste", e => e.preventDefault());
+inp.addEventListener("keydown", e => { if (e.key === "Escape") reset(); });
+code.addEventListener("click", () => inp.focus());
+$("next").onclick = reset;
+
+function finish(){
+  finished = true; clearInterval(timer); inp.disabled = true;
+  result = stats();
+  $("rt").textContent = result.wpm >= 60 ? "Lightning fingers! ⚡" : result.wpm >= 35 ? "Nice typing! 🎉" : "Done! 👏";
+  $("rs").textContent = `${result.wpm} WPM · ${result.acc}% accuracy · ${result.sec.toFixed(1)} s`;
+  $("res").classList.add("show"); $("nm").focus();
+}
+$("sf").addEventListener("submit", e => {
+  e.preventDefault(); if (!result) return;
+  board.push({ name: $("nm").value.trim(), wpm: result.wpm, acc: result.acc, at: Date.now() });
+  board.sort((a, b) => b.wpm - a.wpm || b.acc - a.acc); board = board.slice(0, 10);
+  try { localStorage.setItem(KEY, JSON.stringify(board)); } catch (e) {}
+  $("nm").value = ""; drawBoard(); reset();
+});
+function drawBoard(){
+  const ol = $("lb"); ol.innerHTML = "";
+  board.forEach(b => { const li = document.createElement("li"); li.innerHTML = '<span class="n"></span><b></b><small></small>'; li.children[0].textContent = b.name; li.children[1].textContent = b.wpm + " wpm"; li.children[2].textContent = b.acc + "%"; ol.appendChild(li); });
+  $("lbe").style.display = board.length ? "none" : "block";
+}
+drawBoard(); reset();
+window.__dbg = { type: s => { inp.value = ""; for (const c of s){ inp.value += c; inp.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: c })); } }, get text(){ return text; } };
+})();
+</script>
+</body>
+</html>

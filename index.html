@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open Day Experiences</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --pink:#f6c9d8; --line:#2a3070; }
+  *{box-sizing:border-box}
+  html,body{margin:0;min-height:100%;color:#fff;font-family:Outfit,system-ui,sans-serif;
+    background:radial-gradient(circle at 20% 0%,#1d1a5a 0%,#0a0b26 50%,#04050f 100%) fixed}
+  .wrap{max-width:1080px;margin:0 auto;padding:44px 18px 60px}
+  h1{margin:0;text-align:center;font-weight:800;font-size:clamp(32px,6vw,60px);letter-spacing:1px;
+     background:linear-gradient(90deg,#ffb3d9,#c9a6ff,#9fd8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{text-align:center;color:#8b92c9;margin:8px 0 34px;font-size:16px}
+  h2{margin:34px 0 14px;font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#7a80b8;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+  a.card{display:block;text-decoration:none;color:inherit;padding:18px;border-radius:18px;background:rgba(18,20,58,.65);border:1px solid var(--line);
+         transition:transform .18s,border-color .18s,box-shadow .18s}
+  a.card:hover{transform:translateY(-4px);border-color:var(--pink);box-shadow:0 10px 36px rgba(246,201,216,.12)}
+  .ic{font-size:30px;margin-bottom:8px}
+  .card b{display:block;font-size:19px;margin-bottom:4px}
+  .card span{color:#9aa0d6;font-size:14px;line-height:1.45}
+  .tag{display:inline-block;margin-top:10px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#ffe6a8;border:1px solid #ffe6a855;border-radius:999px;padding:3px 10px}
+  .foot{text-align:center;color:#5d658f;font-size:13px;margin-top:40px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Open Day</h1>
+  <p class="sub">Pick an experience · press <b>F11</b> for full screen on the big display</p>
+
+  <h2>Visitors play</h2>
+  <div class="grid">
+    <a class="card" href="name-stars.html"><div class="ic">⭐</div><b>Your Name In Stars</b><span>Type a name and thousands of stars become it. Push them away with the mouse.</span><i class="tag">interactive</i></a>
+    <a class="card" href="ascii-mirror.html"><div class="ic">📷</div><b>ASCII Mirror</b><span>The camera turns each visitor into live code. Save a snapshot.</span><i class="tag">camera</i></a>
+    <a class="card" href="wish-tree.html"><div class="ic">🌳</div><b>Wish Tree</b><span>Hang a wish on a glowing tree. It fills up all day.</span><i class="tag">interactive</i></a>
+    <a class="card" href="typing-challenge.html"><div class="ic">⌨️</div><b>Code Typing Challenge</b><span>Type a line of code fast. Leaderboard of the day's champions.</span><i class="tag">game</i></a>
+  </div>
+
+  <h2>Big screen shows</h2>
+  <div class="grid">
+    <a class="card" href="logo-rain.html"><div class="ic">🌧️</div><b>Logo From The Rain</b><span>Rain gathers into your logo. Drop in your own image.</span><i class="tag">loop</i></a>
+    <a class="card" href="countdown.html"><div class="ic">⏳</div><b>Epic Countdown</b><span>Particle digits count down to the opening, then fireworks.</span><i class="tag">event</i></a>
+    <a class="card" href="ascii-clock.html"><div class="ic">⏰</div><b>ASCII Clock</b><span>A live clock built from letters, with a rainbow ring.</span><i class="tag">loop</i></a>
+    <a class="card" href="i-love-you-heart.html"><div class="ic">❤️</div><b>Love Heart</b><span>"I love you" flowing around a 3D heart.</span><i class="tag">loop</i></a>
+  </div>
+
+  <h2>Art pieces</h2>
+  <div class="grid">
+    <a class="card" href="rain-couple.html"><div class="ic">☂️</div><b>Rain Couple</b><span>Rain particles form a couple under a lamp post.</span><i class="tag">loop</i></a>
+    <a class="card" href="rose-girl.html"><div class="ic">🌹</div><b>Rose &amp; Girl</b><span>Line art drawn from drifting dust.</span><i class="tag">loop</i></a>
+    <a class="card" href="butterfly.html"><div class="ic">🦋</div><b>Neon Butterfly</b><span>A neon butterfly drawn by a math curve, over and over in a loop.</span><i class="tag">loop</i></a>
+  </div>
+  <p class="foot">Tip: run <code>python -m http.server</code> in this folder if the camera or fonts don't load from a double-click.</p>
+</div>
+</body>
+</html>
