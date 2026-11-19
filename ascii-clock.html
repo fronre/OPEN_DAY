@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ASCII Clock</title>
+<style>
+  :root{ --bg:#050817; --muted:#55608a; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden}
+  body{background:radial-gradient(circle at 50% 45%, #13205a 0%, #0a1033 38%, #050817 75%)}
+  canvas{display:block;width:100vw;height:100vh;cursor:pointer;touch-action:manipulation;user-select:none}
+  .hint{position:fixed;left:0;right:0;bottom:14px;text-align:center;font:12px ui-monospace,Consolas,monospace;
+    color:var(--muted);pointer-events:none;letter-spacing:1px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">click to replay</div>
+
+<script>
+(() => {
+// ======================= settings =======================
+const LETTERS = "abcdefghijklmnopqrstuvwxyz0123456789#@$%&*+=<>/\\|";
+const ORBIT_TIME = 2.2;      // ثوانٍ تدور فيها الحروف قبل أن تطير
+const FLY = 0.9;             // زمن طيران كل حرف
+const HOUR_C = "#5fd4ff", MIN_C = "#ff5fae", SEC_C = "#ffe27a", TICK_C = "#f3f0d8";
+const ORBITS = [[-0.10, -0.03, 0.17], [0.07, -0.06, 0.20], [0.02, 0.06, 0.13], [-0.03, 0.01, 0.09]];
+
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+const glow = document.createElement("canvas");
+const gctx = glow.getContext("2d");
+let W, H, DPR, S, CX, CY, R, FS, parts = [], t0 = performance.now();
+const rand = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+const pick = s => s[(Math.random() * s.length) | 0];
+const TAU = Math.PI * 2;
+
+// ======================= بناء الحروف =======================
+function build(){
+  parts = [];
+  const add = (o) => parts.push(Object.assign({
+    x: CX, y: CY, ch: pick(LETTERS), rot: 0, delay: 0, size: 1,
+    orbit: (Math.random() * 4) | 0, oa: rand(TAU), os: rand(1.6, 3.2) * (Math.random() < .5 ? -1 : 1),
+    show: Math.random() < 0.12,   // قليل من الحروف فقط يظهر وهو يدور (كي لا تتكدس)
+  }, o));
+
+  // الحلقة الملونة: 3 صفوف من "-" و "="
+  [[1.00, "-"], [0.955, "="], [0.91, "-"]].forEach(([k, ch], row) => {
+    const r = R * k, n = Math.round(TAU * r / (FS * 0.78));
+    for (let i = 0; i < n; i++){
+      const a = i / n * TAU;                      // من الساعة 12 مع عقارب الساعة
+      add({ kind: "ring", final: ch, a, r, delay: a / TAU * 1.7 + row * 0.08,
+            color: `hsl(${(200 - a / TAU * 300 + 360) % 360} 85% 62%)` });
+    }
+  });
+  // علامات الساعات والدقائق
+  for (let i = 0; i < 60; i++){
+    const a = i / 60 * TAU, hour = i % 5 === 0;
+    if (hour){
+      for (const dr of [0, 1]) add({ kind: "tick", final: "=", a, r: R * (0.80 - dr * 0.055), size: 1.15,
+        delay: 1.7 + i / 60 * 0.6, color: TICK_C });
+    } else add({ kind: "tick", final: "·", a, r: R * 0.83, delay: 1.7 + i / 60 * 0.6, color: "#8d96c4" });
+  }
+  // العقارب: سلسلة حروف على امتداد كل عقرب
+  const hand = (kind, len, ch, color, size) => {
+    const n = Math.round(len * R / (FS * 0.62));
+    for (let k = 1; k <= n; k++) add({ kind, final: ch, k: k / n * len, color, size, delay: 2.3 + k / n * 0.4 });
+  };
+  hand("hour", 0.50, "=", HOUR_C, 1.15);
+  hand("min", 0.76, "=", MIN_C, 1.0);
+  hand("sec", 0.86, "-", SEC_C, 0.85);
+  add({ kind: "hub", final: "o", color: "#ffffff", size: 1.2, delay: 2.6 });
+  // الساعة الرقمية
+  for (let i = 0; i < 8; i++) add({ kind: "dig", i, final: "0", color: "#e8ecff", size: 1.25, delay: 2.5 + i * 0.05 });
+}
+
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  if (!W || !H) return;
+  for (const c of [cv, glow]){ c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+  S = Math.min(W, H);
+  CX = W / 2; CY = H * 0.46;
+  R = S * 0.33;
+  FS = Math.max(10, S * 0.026);
+  build();
+}
+
+// ======================= الأماكن =======================
+function timeParts(){
+  const d = new Date();
+  const ms = d.getMilliseconds(), s = d.getSeconds() + ms / 1000;
+  const m = d.getMinutes() + s / 60, h = (d.getHours() % 12) + m / 60;
+  return { d, s, m, h };
+}
+function target(p, tp){
+  switch (p.kind){
+    case "ring": case "tick":
+      return [CX + Math.sin(p.a) * p.r, CY - Math.cos(p.a) * p.r, 0];
+    case "hour": case "min": case "sec": {
+      const a = p.kind === "hour" ? tp.h / 12 * TAU : p.kind === "min" ? tp.m / 60 * TAU : tp.s / 60 * TAU;
+      return [CX + Math.sin(a) * p.k * R, CY - Math.cos(a) * p.k * R, a - Math.PI / 2];
+    }
+    case "hub": return [CX, CY, 0];
+    case "dig": {
+      const gap = FS * 1.25;                           // HH:MM:SS بمسافات واسعة
+      return [CX + (p.i - 3.5) * gap * 1.15, CY + R * 1.32, 0];
+    }
+  }
+}
+function orbitPos(p, t){
+  // 4 دوائر صغيرة متداخلة في المنتصف (مثل بداية الفيديو)
+  const C = ORBITS[p.orbit], a = p.oa + t * p.os, r = C[2] * R;
+  return [CX + C[0] * R + Math.cos(a) * r, CY + C[1] * R + Math.sin(a) * r];
+}
+
+// ======================= الحركة والرسم =======================
+const ease = u => 1 - Math.pow(1 - u, 3);
+const ASSEMBLE = 3.0;
+
+function frame(now){
+  if (!W || innerWidth !== W) resize();
+  if (!W){ requestAnimationFrame(frame); return; }
+  const t = (now - t0) / 1000;
+  const tp = timeParts();
+  const digits = tp.d.toTimeString().slice(0, 8);   // "13:10:04"
+
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  // دوائر المدار الخافتة أثناء البداية
+  const orbitFade = Math.max(0, 1 - Math.max(0, t - ORBIT_TIME) / 1.2);
+  if (orbitFade > 0){
+    ctx.strokeStyle = `rgba(190,210,255,${0.35 * orbitFade})`; ctx.lineWidth = 1;
+    for (const C of ORBITS){ ctx.beginPath(); ctx.arc(CX + C[0] * R, CY + C[1] * R, C[2] * R, 0, TAU); ctx.stroke(); }
+  }
+
+  // أثر عقرب الثواني (خطوط باهتة خلفه)
+  if (t > ORBIT_TIME + ASSEMBLE){
+    ctx.font = `${FS * 0.85}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (let g = 1; g <= 14; g++){
+      const a = (tp.s - g * 0.09) / 60 * TAU;
+      ctx.fillStyle = `rgba(255,95,174,${0.22 * (1 - g / 15)})`;
+      for (let k = 0.18; k <= 0.86; k += 0.06){
+        ctx.save();
+        ctx.translate(CX + Math.sin(a) * k * R, CY - Math.cos(a) * k * R);
+        ctx.rotate(a - Math.PI / 2);
+        ctx.fillText("-", 0, 0);
+        ctx.restore();
+      }
+    }
+  }
+
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const p of parts){
+    const [tx, ty, trot] = target(p, tp);
+    let ch = p.final;
+    if (p.kind === "dig") ch = digits[p.i];
+    const start = ORBIT_TIME + p.delay;
+    if (t < start){                                  // ما زال يدور في المدار
+      const [ox, oy] = orbitPos(p, t);
+      p.x = ox; p.y = oy; p.rot = 0;
+      if (Math.random() < 0.04) p.ch = pick(LETTERS);
+      ch = p.ch;
+      p.fromX = ox; p.fromY = oy;
+      if (!p.show) continue;
+    } else {
+      const u = Math.min(1, (t - start) / FLY), e = ease(u);
+      if (u < 1){
+        p.x = p.fromX + (tx - p.fromX) * e;
+        p.y = p.fromY + (ty - p.fromY) * e;
+        p.rot = trot * e;
+        if (Math.random() < 0.25) p.ch = pick(LETTERS);   // حرف عشوائي أثناء الطيران
+        ch = p.ch;
+      } else {
+        p.x = tx; p.y = ty; p.rot = trot;
+      }
+    }
+    const big = t < start ? 1.2 : 1;                // الحروف أكبر وهي تدور
+    ctx.font = `600 ${FS * p.size * big}px ui-monospace, Consolas, "Courier New", monospace`;
+    ctx.fillStyle = t < start ? "#cfe0ff" : p.color;
+    if (p.rot){
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillText(ch, 0, 0); ctx.restore();
+    } else ctx.fillText(ch, p.x, p.y);
+  }
+
+  // توهّج ناعم: نسخة مموّهة فوق الرسم
+  gctx.setTransform(1, 0, 0, 1, 0, 0);
+  gctx.clearRect(0, 0, glow.width, glow.height);
+  gctx.filter = `blur(${6 * DPR}px)`;
+  gctx.drawImage(cv, 0, 0);
+  gctx.filter = "none";
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.65;
+  ctx.drawImage(glow, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+
+  requestAnimationFrame(frame);
+}
+
+cv.addEventListener("click", () => { t0 = performance.now(); build(); });
+addEventListener("resize", resize);
+resize();
+requestAnimationFrame(frame);
+window.__dbg = { skip: s => t0 -= s * 1000 };
+})();
+</script>
+</body>
+</html>
